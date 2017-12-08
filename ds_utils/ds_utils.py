@@ -2,11 +2,13 @@ import pandas as pd
 import sklearn.linear_model as lm
 import sklearn.model_selection as ms
 import sklearn.ensemble as en
+import dill
 
 """
 TODO:
     -Build classifier and cluster classes.
     -Implement grid search
+    -Pickle
 """
 
 
@@ -40,9 +42,9 @@ class Predictor(object):
             filepath (str): full or relative path to file being loaded
             sep (str): delimiter for csv file being loaded, default is ","
         """
-        if filename.split('.')[1] == 'csv':
+        if filepath.split('.')[-1] == 'csv':
             self.data = pd.read_csv(filepath, sep=sep)
-        if filename.split('.')[1] == 'json':
+        if filepath.split('.')[-1] == 'json':
             self.data = pd.read_json(filepath)
         else:
             print 'Please select a csv or json file'
@@ -139,6 +141,9 @@ class Predictor(object):
             dummies = pd.get_dummies(self.data[column], prefix=column)
             self.data = pd.concat((self.data, dummies), axis=1)
             self.data.drop(column, axis=1, inplace=True)
+
+    def pickle_model(self, model):
+        pass
 
 
 class Classifier(object):
