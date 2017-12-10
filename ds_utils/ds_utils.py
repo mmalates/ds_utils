@@ -17,22 +17,22 @@ TODO:
 class Predictor(object):
     """Process data, train models, and predict flight delays"""
 
-    def __init__(self, data=None, train=None, test=None):
+    def __init__(self, data=None, train=None, test=None, target=None):
         """Reads in data and initializes some attributes for later
 
         Args:
             data: preloaded dataframe, default is None
         """
         self.data = data
+        self.target_name = target
         self.target = None
-        self.target_name = None
-        self.model_dict = {'Linear': lm.LinearRegression(),
+        self.model_dict = {'LinearRegression': lm.LinearRegression(),
                            'Lasso': lm.Lasso(),
                            'Ridge': lm.Ridge,
                            'RandomForestRegressor': en.RandomForestRegressor(),
-                           'AdaBoost': en.AdaBoostRegressor(),
+                           'AdaBoostRegressor': en.AdaBoostRegressor(),
                            'GradientBoost': en.GradientBoostingRegressor(),
-                           'Bagging': en.BaggingRegressor(),
+                           'BaggingRegressor': en.BaggingRegressor(),
                            'RandomForestClassifier': en.RandomForestClassifier()}
         self.features_ = []
         self.selected_features_ = []
@@ -42,6 +42,7 @@ class Predictor(object):
         self.test = test
         self.predicitons = None
         self.score_ = None
+        self.best_params_ = None
         # self.fill_models = {}
         # self.fill_features = {}
 
@@ -76,19 +77,20 @@ class Predictor(object):
     def split(self, test_size=0.25, random_state=None):
         self.train, self.test = ms.train_test_split(
             self.data, test_size=test_size, random_state=random_state)
+        self.target = self.train[self.target_name]
 
-    def fit(self, model_name, target, features, **model_params):
+    def fit(self, model_name, **model_params):
         """Train model on training data
 
         Args:
             model_name (str): options are
-                                {'Linear': lm.LinearRegression(),
+                                {'LinearRegression': lm.LinearRegression(),
                                 'Lasso': lm.Lasso(),
                                 'Ridge': lm.Ridge,
-                                'RandomRorest': en.RandomForestRegressor(),
-                                'AdaBoost': en.AdaBoostRegressor(),
-                                'GradientBoost': en.GradientBoostingRegressor(),
-                                'Bagging': en.BaggingRegressor()}
+                                'RandomRorestRegressor': en.RandomForestRegressor(),
+                                'AdaBoostRegressor': en.AdaBoostRegressor(),
+                                'GradientBoostingRegressor': en.GradientBoostingRegressor(),
+                                'BaggingRegressor': en.BaggingRegressor()}
             target (str): column name of target
             features (list): list of column names to use in fit
             **model_params (dict): Parameters to be passed to model
@@ -96,14 +98,34 @@ class Predictor(object):
         Returns:
             trained model
         """
-        self.target_name = target
-        self.target = self.train[target]
-        self.train = self.train[features]
+        if str(self.target) == 'None':
+            self.target = self.train[self.target_name]
+        self.train = self.train.loc[:, self.selected_features_]
         model = self.model_dict[model_name]
         model.set_params(**model_params)
         self.model = model.fit(self.train, self.target)
 
-    def fitCV(self, model_name, target, features, n_splits, **model_params):
+    def grid_search(self, model_name, params):
+        """Grid search hyperparameters for regression
+
+        Args:
+            model_name (str): options are
+                                {'LinearRegression': lm.LinearRegression(),
+                                'Lasso': lm.Lasso(),
+                                'Ridge': lm.Ridge,
+                                'RandomRorestRegressor': en.RandomForestRegressor(),
+                                'AdaBoostRegressor': en.AdaBoostRegressor(),
+                                'GradientBoostingRegressor': en.GradientBoostingRegressor(),
+                                'BaggingRegressor': en.BaggingRegressor()}
+            **params (dict): grid of parameters to search over.  Keys are parameters as strings and values are lists of parameter values.
+        """
+        model = self.model_dict(model_name)
+        regr = ms.GridSearchCV(
+            estimator=model, param_grid=params, cv=5, scoring='mean_squared_error')
+        regr.fit(self.train[self.selected_features_], self.target)
+        self.best_params_ = regr.best_params_
+
+    def fitCV(self, model_name, n_splits, **model_params):
         """cross-validate model on training data and store score in self.cv_score_
 
         Note:
@@ -112,13 +134,13 @@ class Predictor(object):
         Args:
             n_splits (int): number of splits in cross-validation
             model_name (str): options are
-                                {'Linear': lm.LinearRegression(),
+                                {'LinearRegression': lm.LinearRegression(),
                                 'Lasso': lm.Lasso(),
                                 'Ridge': lm.Ridge,
-                                'RandomRorest': en.RandomForestRegressor(),
-                                'AdaBoost': en.AdaBoostRegressor(),
-                                'GradientBoost': en.GradientBoostingRegressor(),
-                                'Bagging': en.BaggingRegressor()}
+                                'RandomRorestRegressor': en.RandomForestRegressor(),
+                                'AdaBoostRegressor': en.AdaBoostRegressor(),
+                                'GradientBoostingRegressor': en.GradientBoostingRegressor(),
+                                'BaggingRegressor': en.BaggingRegressor()}
             target (str): column name of target
             features (list): list of column names to use in fit
             **model_params (dict): Parameters to be passed to model
@@ -126,8 +148,8 @@ class Predictor(object):
         model = self.model_dict[model_name]
         model.set_params(**model_params)
         errors = []
-        X = self.train[features]
-        y = self.train[target]
+        X = self.train[self.selected_features_]
+        y = self.train[self.target_name]
         kf = ms.KFold(n_splits=n_splits, shuffle=True)
         error = []
         for train_index, test_index in kf.split(y):
@@ -139,11 +161,19 @@ class Predictor(object):
             error.append(np.sqrt(skm.mean_squared_error(y_test, predictions)))
         self.cv_score_[model_name] = np.mean(error)
 
-    def predict_missing_values(self, model_name, targets, features, **model_params):
+    def predict_missing_values(self, data, model_name, targets, features, **model_params):
         """Predicts missing values based on filled values
 
         Args:
-            model_name:
+            model_name: options are {'LinearRegression':
+                                lm.LinearRegression(),
+                               'Lasso': lm.Lasso(),
+                               'Ridge': lm.Ridge,
+                               'RandomForestRegressor': en.RandomForestRegressor(),
+                               'AdaBoostRegressor': en.AdaBoostRegressor(),
+                               'GradientBoost': en.GradientBoostingRegressor(),
+                               'BaggingRegressor': en.BaggingRegressor(),
+                               'RandomForestClassifier': en.RandomForestClassifier()}
             targets: list of column names with missing values to be filled in
             features: features used to predict missing values
         """
@@ -151,11 +181,11 @@ class Predictor(object):
             model = self.model_dict[model_name]
             model.set_params(**model_params)
             cols = features + [target]
-            train_df = self.train.loc[:, cols].dropna()
-            fill_mask = pd.isnull(self.train[target])
+            train_df = data.loc[:, cols].dropna()
+            fill_mask = pd.isnull(data[target])
             model.fit(train_df[features], train_df[target])
-            self.train.loc[fill_mask, target] = model.predict(
-                self.train.loc[fill_mask, features])
+            data.loc[fill_mask, target] = model.predict(
+                data.loc[fill_mask, features])
             if str(self.test) != 'None':
                 print pd.isnull(self.test[target]).any()
                 if pd.isnull(self.test[target]).any():
@@ -163,6 +193,7 @@ class Predictor(object):
                     print self.test.loc[fill_mask, features]
                     self.test.loc[fill_mask, target] = model.predict(
                         self.test.loc[fill_mask, features])
+        return data
     #
     # def predict_test_missing_values(self):
     #     for target in self.fill_models.keys():
@@ -182,8 +213,13 @@ class Predictor(object):
 
     def select_features(self):
         """trains a Lasso regression and drops features with 0 coefficients"""
-        model = lm.LassoCV(normalize=True)
-        model.fit(self.data[self.features_], self.target)
+        print 'tuning alpha'
+        hyper_params_model = lm.LassoCV(normalize=True, max_iter=2000).fit(
+            self.train[self.features_], self.target)
+        alpha = hyper_params_model.alpha_
+        print 'alpha is: {}'.format(alpha)
+        model = lm.Lasso(alpha=alpha, normalize=True, copy_X=True)
+        model.fit(self.train[self.features_], self.target)
         with open('lasso_coefficients.txt', 'w') as f:
             for coef, feature in sorted(zip(model.coef_, self.features_)):
                 f.write('{} : {}\n'.format(feature, coef))
@@ -195,16 +231,17 @@ class Predictor(object):
         self.score_ = np.sqrt(mean_squared_error(
             self.predictions, self.test[self.target_name]))
 
-    def dummify(self, dummy_columns):
+    def dummify(self, data, dummy_columns):
         """Dummifies categorical features
 
         Args:
             dummy_columns (list): columns to create dummy columns from
         """
         for column in dummy_columns:
-            dummies = pd.get_dummies(self.data[column], prefix=column)
-            self.data = pd.concat((self.data, dummies), axis=1)
-            self.data.drop(column, axis=1, inplace=True)
+            dummies = pd.get_dummies(data[column], prefix=column)
+            data = pd.concat((data, dummies), axis=1)
+            data.drop(column, axis=1, inplace=True)
+        return data
 
     def pickle_model(self, model):
         pass
