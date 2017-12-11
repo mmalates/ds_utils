@@ -267,7 +267,7 @@ class Predictor(object):
 
     def pickle_model(self, filename):
         with open(filename, 'wb') as pkl:
-            pkl.dump(self.model)
+            pickle.dump(self.model, pkl)
 
 
 class Classifier(object):
