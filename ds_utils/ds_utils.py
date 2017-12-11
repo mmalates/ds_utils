@@ -85,7 +85,7 @@ class Predictor(object):
             self.data, test_size=test_size, random_state=random_state)
         self.target = self.train[self.target_name]
 
-    def fit(self, data, model_name, **model_params):
+    def fit(self, model_name, **model_params):
         """Train model on training data
 
         Args:
@@ -130,7 +130,7 @@ class Predictor(object):
             estimator=model, param_grid=params, cv=3, scoring='neg_mean_squared_error', n_jobs=-1, verbose=4)
         regr.fit(self.train[self.selected_features_], self.target)
         self.best_params_ = regr.best_params_
-        self.train_score_ = regr.score_
+        self.train_score_ = regr.best_score_
 
     def mean_baseline(self):
         train_mean = np.mean(self.target)
