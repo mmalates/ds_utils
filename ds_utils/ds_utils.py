@@ -43,6 +43,7 @@ class Predictor(object):
         self.model = None
         self.cv_score_ = {}
         self.train = None
+        self.test = None
         self.data_to_predict = data_to_predict
         self.predictions = None
         self.train_score_ = None
@@ -172,7 +173,7 @@ class Predictor(object):
             error.append(np.sqrt(skm.mean_squared_error(y_test, predictions)))
         self.cv_score_[model_name] = np.mean(error)
 
-    def predict_missing_values(self, model_name, targets, features, **model_params):
+    def predict_missing_values(self, data, model_name, targets, features, **model_params):
         """Predicts missing values based on filled values
 
         Args:
