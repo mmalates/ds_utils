@@ -5,6 +5,10 @@ import sklearn.model_selection as ms
 import sklearn.ensemble as en
 from sklearn.metrics import mean_squared_error
 import dill
+try:
+    import cPickle as pickle
+except:
+    import pickle
 
 """
 TODO:
@@ -17,7 +21,7 @@ TODO:
 class Predictor(object):
     """Process data, train models, and predict flight delays"""
 
-    def __init__(self, data=None, train=None, test=None, target=None):
+    def __init__(self, data=None, data_to_predict=None, target=None):
         """Reads in data and initializes some attributes for later
 
         Args:
@@ -38,10 +42,11 @@ class Predictor(object):
         self.selected_features_ = []
         self.model = None
         self.cv_score_ = {}
-        self.train = train
-        self.test = test
-        self.predicitons = None
-        self.score_ = None
+        self.train = None
+        self.data_to_predict = data_to_predict
+        self.predictions = None
+        self.train_score_ = None
+        self.test_score_ = None
         self.best_params_ = None
         # self.fill_models = {}
         # self.fill_features = {}
@@ -79,7 +84,7 @@ class Predictor(object):
             self.data, test_size=test_size, random_state=random_state)
         self.target = self.train[self.target_name]
 
-    def fit(self, model_name, **model_params):
+    def fit(self, data, model_name, **model_params):
         """Train model on training data
 
         Args:
@@ -99,11 +104,11 @@ class Predictor(object):
             trained model
         """
         if str(self.target) == 'None':
-            self.target = self.train[self.target_name]
-        self.train = self.train.loc[:, self.selected_features_]
+            self.target = self.data[self.target_name]
+        self.data = self.data.loc[:, self.selected_features_]
         model = self.model_dict[model_name]
         model.set_params(**model_params)
-        self.model = model.fit(self.train, self.target)
+        self.model = model.fit(self.data, self.target)
 
     def grid_search(self, model_name, params):
         """Grid search hyperparameters for regression
@@ -119,11 +124,18 @@ class Predictor(object):
                                 'BaggingRegressor': en.BaggingRegressor()}
             **params (dict): grid of parameters to search over.  Keys are parameters as strings and values are lists of parameter values.
         """
-        model = self.model_dict(model_name)
+        model = self.model_dict[model_name]
         regr = ms.GridSearchCV(
-            estimator=model, param_grid=params, cv=5, scoring='mean_squared_error')
+            estimator=model, param_grid=params, cv=3, scoring='neg_mean_squared_error', n_jobs=-1, verbose=4)
         regr.fit(self.train[self.selected_features_], self.target)
         self.best_params_ = regr.best_params_
+        self.train_score_ = regr.score_
+
+    def mean_baseline(self):
+        train_mean = np.mean(self.target)
+        rmse = np.sqrt(
+            np.mean(np.square(self.test[self.target_name] - train_mean)))
+        print 'mean baseline RMSE:  {}'.format(rmse)
 
     def fitCV(self, model_name, n_splits, **model_params):
         """cross-validate model on training data and store score in self.cv_score_
@@ -153,7 +165,6 @@ class Predictor(object):
         kf = ms.KFold(n_splits=n_splits, shuffle=True)
         error = []
         for train_index, test_index in kf.split(y):
-            print 'new fold'
             y_train, y_test = y.iloc[train_index], y.iloc[test_index]
             X_train, X_test = X.iloc[train_index], X.iloc[test_index]
             model.fit(X_train, y_train)
@@ -161,7 +172,7 @@ class Predictor(object):
             error.append(np.sqrt(skm.mean_squared_error(y_test, predictions)))
         self.cv_score_[model_name] = np.mean(error)
 
-    def predict_missing_values(self, data, model_name, targets, features, **model_params):
+    def predict_missing_values(self, model_name, targets, features, **model_params):
         """Predicts missing values based on filled values
 
         Args:
@@ -214,11 +225,12 @@ class Predictor(object):
     def select_features(self):
         """trains a Lasso regression and drops features with 0 coefficients"""
         print 'tuning alpha'
-        hyper_params_model = lm.LassoCV(normalize=True, max_iter=2000).fit(
+        hyper_params_model = lm.LassoCV(normalize=True, n_jobs=-1).fit(
             self.train[self.features_], self.target)
         alpha = hyper_params_model.alpha_
         print 'alpha is: {}'.format(alpha)
-        model = lm.Lasso(alpha=alpha, normalize=True, copy_X=True)
+        print 'fitting lasso to get coefficients'
+        model = lm.Lasso(alpha=alpha, normalize=True)
         model.fit(self.train[self.features_], self.target)
         with open('lasso_coefficients.txt', 'w') as f:
             for coef, feature in sorted(zip(model.coef_, self.features_)):
@@ -226,10 +238,19 @@ class Predictor(object):
                 if coef not in [-0.0, 0.0]:
                     self.selected_features_.append(feature)
 
-    def predict(self, data_to_predict):
-        self.predictions = self.model.predict(data_to_predict)
-        self.score_ = np.sqrt(mean_squared_error(
-            self.predictions, self.test[self.target_name]))
+    def score(self, model_name, **params):
+        model = self.model_dict[model_name]
+        model.set_params(**params)
+        model.fit(self.train[self.selected_features_], self.target)
+        predictions = model.predict(self.test[self.selected_features_])
+        self.test_score_ = np.sqrt(mean_squared_error(
+            predictions, self.test[self.target_name]))
+
+    def processing(self):
+        pass
+
+    def predict(self):
+        self.predictions = self.model.predict(self.data_to_predict)
 
     def dummify(self, data, dummy_columns):
         """Dummifies categorical features
@@ -243,8 +264,9 @@ class Predictor(object):
             data.drop(column, axis=1, inplace=True)
         return data
 
-    def pickle_model(self, model):
-        pass
+    def pickle_model(self, filename):
+        with open(filename, 'wb') as pkl:
+            pkl.dump(self.model)
 
 
 class Classifier(object):
