@@ -12,8 +12,6 @@ except:
 """
 TODO:
     -Build classifier and cluster classes.
-    -Implement grid search
-    -Pickle
 """
 
 
