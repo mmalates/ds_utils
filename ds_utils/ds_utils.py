@@ -284,7 +284,7 @@ class Predictor(object):
         Args:
             features (list): list of feature column names
         """
-        self.features_ = features
+        self.features_ = list(features)
 
 
 class Classifier(object):
