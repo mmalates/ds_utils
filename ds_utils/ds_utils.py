@@ -26,7 +26,6 @@ class Predictor(object):
         """
         self.data = data
         self.target_name = target
-        self.target = None
         self.model_dict = {'LinearRegression': lm.LinearRegression(),
                            'Lasso': lm.Lasso(),
                            'Ridge': lm.Ridge,
@@ -39,8 +38,8 @@ class Predictor(object):
         self.selected_features_ = []
         self.model = None
         self.cv_score_ = {}
-        self.train = None
-        self.test = None
+        self.train_index = None
+        self.test_index = None
         self.data_to_predict = data_to_predict
         self.predictions = None
         self.train_score_ = None
@@ -134,8 +133,8 @@ class Predictor(object):
         model = self.model_dict[model_name]
         regr = ms.GridSearchCV(
             estimator=model, param_grid=params, cv=3, scoring='neg_mean_squared_error', n_jobs=1, verbose=1)
-        regr.fit(self.train[self.selected_features_],
-                 self.train[self.target_name])
+        regr.fit(self.data.loc[self.train_index, self.selected_features_],
+                 self.data.loc[self.train_index, self.target_name])
         self.best_params_ = regr.best_params_
         self.train_score_ = regr.best_score_
 
@@ -161,27 +160,17 @@ class Predictor(object):
             sep (str): delimiter for csv file being loaded, default is ","
         """
         if filepath.split('.')[-1] == 'csv':
-            self.predict_data = pd.read_csv(filepath, sep=sep)
+            self.data_to_predict = pd.read_csv(filepath, sep=sep)
         elif filepath.split('.')[-1] == 'json':
-            self.predict_data = pd.read_json(filepath)
+            self.data_to_predict = pd.read_json(filepath)
         else:
             print 'Please select a csv or json file'
 
-    def split(self, test_size=0.25, random_state=None):
-        """splits the data into train and test
-
-        Args:
-            test_size (float (0-1): proportion of data to allocate to test
-            random_state (int): for obtaining reproducible splits
-        """
-        self.train, self.test = ms.train_test_split(
-            self.data, test_size=test_size, random_state=random_state)
-
     def mean_baseline(self):
         """calculates the RMSE of the target about the mean"""
-        train_mean = np.mean(self.train[self.target_name])
+        train_mean = np.mean(self.data.loc[self.train_index, self.target_name])
         rmse = np.sqrt(
-            np.mean(np.square(self.test[self.target_name] - train_mean)))
+            np.mean(np.square(self.data.loc[self.test_index, self.target_name] - train_mean)))
         print 'mean baseline RMSE:  {}'.format(rmse)
 
     def pickle_model(self, filename):
@@ -222,22 +211,25 @@ class Predictor(object):
         """
         for target in targets:
             cols = features + [target]
-            train_df = data.loc[:, cols].dropna()
-            fill_mask = pd.isnull(data[target])
+            train_fit_mask = pd.notnull(
+                data.loc[self.train_index, target])
+            # train_df = data.loc[:, cols].dropna()
+            train_fill_mask = pd.isnull(data.loc[self.train_index, target])
             hyper_params_model = lm.LassoCV(normalize=True, copy_X=True, n_jobs=-1).fit(
-                train_df[features], train_df[target])
+                data.loc[train_fit_mask, features], data.loc[train_fit_mask, target])
             model = lm.Lasso(alpha=hyper_params_model.alpha_,
                              copy_X=True, normalize=True)
-            model.fit(train_df[features], train_df[target])
-            data.loc[fill_mask, target] = model.predict(
-                data.loc[fill_mask, features])
-            if str(self.test) != 'None':
-                print pd.isnull(self.test[target]).any()
-                if pd.isnull(self.test[target]).any():
-                    fill_mask = pd.isnull(self.test[target])
-                    print self.test.loc[fill_mask, features]
-                    self.test.loc[fill_mask, target] = model.predict(
-                        self.test.loc[fill_mask, features])
+            model.fit(data.loc[train_fit_mask, features],
+                      data.loc[train_fit_mask, target])
+            data.loc[train_fill_mask, target] = model.predict(
+                data.loc[train_fill_mask, features])
+            if str(self.test_index) != 'None':
+                if pd.isnull(self.data.loc[self.test_index, target]).any():
+                    test_fill_mask = pd.isnull(
+                        self.data.loc[self.test_index, target])
+                    print self.test.loc[test_fill_mask, features]
+                    self.data.loc[test_fill_mask, target] = model.predict(
+                        self.data.loc[test_fill_mask, features])
         return data
 
     def processing(self):
@@ -257,21 +249,23 @@ class Predictor(object):
         """
         model = self.model_dict[model_name]
         model.set_params(**params)
-        model.fit(self.train[self.selected_features_],
-                  self.train[self.target_name])
-        predictions = model.predict(self.test[self.selected_features_])
+        model.fit(self.data.loc[self.train_index, self.selected_features_],
+                  self.data.loc[self.train_index, self.target_name])
+        predictions = model.predict(
+            self.data.loc[self.test_index, self.selected_features_])
         self.test_score_ = np.sqrt(mean_squared_error(
-            predictions, self.test[self.target_name]))
+            predictions, self.data.loc[self.test_index, self.target_name]))
 
     def select_features(self):
         """trains a Lasso regression and drops features with 0 coefficients"""
         print 'tuning alpha'
         hyper_params_model = lm.LassoCV(normalize=True, n_jobs=-1).fit(
-            self.train[self.features_], self.train[self.target_name])
+            self.data.loc[self.train_index, self.features_], self.data.loc[self.train_index, self.target_name])
         print 'alpha is: {}'.format(hyper_params_model.alpha_)
         print 'fitting lasso to get coefficients'
         model = lm.Lasso(alpha=hyper_params_model.alpha_, normalize=True)
-        model.fit(self.train[self.features_], self.train[self.target_name])
+        model.fit(self.data.loc[self.train_index, self.features_],
+                  self.data.loc[self.train_index, self.target_name])
         with open('lasso_coefficients.txt', 'w') as f:
             for coef, feature in sorted(zip(model.coef_, self.features_)):
                 f.write('{} : {}\n'.format(feature, coef))
@@ -285,6 +279,17 @@ class Predictor(object):
             features (list): list of feature column names
         """
         self.features_ = list(features)
+
+    def split(self, test_size=0.25, random_state=None):
+        """splits the data into train and test
+
+        Args:
+            test_size (float (0-1): proportion of data to allocate to test
+            random_state (int): for obtaining reproducible splits
+        """
+        index = np.arange(self.data.shape[0])
+        self.train_index, self.test_index = ms.train_test_split(
+            index, test_size=test_size, random_state=random_state)
 
 
 class Classifier(object):
