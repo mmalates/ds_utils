@@ -287,9 +287,8 @@ class Predictor(object):
             test_size (float (0-1): proportion of data to allocate to test
             random_state (int): for obtaining reproducible splits
         """
-        index = np.arange(self.data.shape[0])
         self.train_index, self.test_index = ms.train_test_split(
-            index, test_size=test_size, random_state=random_state)
+            self.data.index, test_size=test_size, random_state=random_state)
 
 
 class Classifier(object):
